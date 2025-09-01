@@ -75,7 +75,7 @@
 #' @import stringr
 #' @importFrom rlang .data sym !! !!! :=
 #' @importFrom matrixStats rowSds
-#' @importFrom ggplot2 facet_wrap facet_grid2
+#' @importFrom ggplot2 facet_wrap
 #' @importFrom ggh4x facet_grid2
 #'
 #' @examples
