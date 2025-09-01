@@ -1,4 +1,4 @@
-#' Import a list of BigWig files.
+#' Import a list of BigWig files
 #'
 #' This function imports multiple BigWig files into a list of \code{rtracklayer::BigWigFile} objects.
 #'
