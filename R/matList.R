@@ -27,7 +27,7 @@
 #' or base R numeric matrices, depending on the \code{output} parameter.
 #'
 #' @importFrom rtracklayer import
-#' @importFrom GenomicRanges strand subset
+#' @importFrom GenomicRanges strand
 #' @importFrom purrr map imap
 #' @importFrom dplyr bind_cols
 #' @importFrom furrr future_map

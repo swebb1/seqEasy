@@ -39,7 +39,8 @@
 #'
 #' @return A list of \code{EnrichedHeatmap} objects, one for each matrix in the input \code{matl}.
 #'
-#' @importFrom EnrichedHeatmap EnrichedHeatmap HeatmapAnnotation anno_enriched
+#' @importFrom EnrichedHeatmap EnrichedHeatmap anno_enriched
+#' @importFrom ComplexHeatmap HeatmapAnnotation
 #' @importFrom circlize colorRamp2
 #' @importFrom RColorBrewer brewer.pal
 #' @importFrom stats quantile

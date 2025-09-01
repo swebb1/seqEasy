@@ -2,7 +2,7 @@
 % Please edit documentation in R/importBWlist.R
 \name{importBWlist}
 \alias{importBWlist}
-\title{Import a list of BigWig files.}
+\title{Import a list of BigWig files}
 \usage{
 importBWlist(bwf, names, selection = NULL)
 }
