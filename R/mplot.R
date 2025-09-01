@@ -76,6 +76,7 @@
 #' @importFrom rlang .data sym !! !!! :=
 #' @importFrom matrixStats rowSds
 #' @importFrom ggplot2 facet_wrap facet_grid2
+#' @importFrom ggh4x facet_grid2
 #'
 #' @examples
 #' # Create some dummy data
