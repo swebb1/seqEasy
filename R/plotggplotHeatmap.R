@@ -49,7 +49,6 @@
 #' @importFrom dplyr %>% left_join group_by summarise
 #' @importFrom stats quantile kmeans
 #' @importFrom patchwork wrap_plots plot_layout
-#' @importFrom viridis scale_fill_viridis_c
 #' @importFrom RColorBrewer brewer.pal
 #'
 #' @examples
