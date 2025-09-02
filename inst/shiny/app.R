@@ -8,6 +8,10 @@ library(EnrichedHeatmap)
 library(ComplexHeatmap)
 library(InteractiveComplexHeatmap)
 library(ggplot2)
+library(dplyr)
+library(stringr)
+library(furrr)
+library(purrr)
 
 # --- Source helper functions (you provided) ---
 source("../../R/getFeature.R")
@@ -46,19 +50,32 @@ ui <- dashboardPage(
                     actionButton("roi_load", "Load ROI")
                 ),
                 box(width = 6, title = "Filter or manipulate", status = "info",
-                    textInput("roi_code","Add code to subset or manipulate GRanges object"),
+                    textInput("roi_code","Add code to subset or manipulate GRanges object",placeholder = "df |> filter(seqnames == 'chr1')"),
+                    actionButton("roi_code_apply","Apply code"),
                     selectInput("start_feature", "Start feature", choices = c("TSS", "TES", "Exon")),
+                    conditionalPanel("input.start_feature == 'Exon'",
+                                     numericInput("start_exon", "Start exon", 1),
+                                     selectInput("start_splice","Start exon ss",choices=c("5prime","3prime"))
+                    ),
                     numericInput("start_flank", "Start flank (bp)", 0),
-                    selectInput("start_direction", "Start direction", choices = c("Upstream", "Downstream")),
-                    selectInput("end_feature", "End feature", choices = c("TSS", "TES", "Exon")),
+                    selectInput("start_direction", "Start direction", choices = c("up", "down"), selected = "up"),
+                    selectInput("end_feature", "End feature", choices = c("TSS", "TES", "Exon"), selected = "TES"),
+                    conditionalPanel("input.end_feature == 'Exon'",
+                                     numericInput("end_exon", "End exon", 1),
+                                     selectInput("end_splice","End exon ss",choices=c("5prime","3prime"))
+                    ),
                     numericInput("end_flank", "End flank (bp)", 0),
-                    selectInput("end_direction", "End direction", choices = c("Upstream", "Downstream")),
+                    selectInput("end_direction", "End direction", choices = c("up", "down"), selected = "down"),
                     actionButton("apply_getFeature", "Apply getFeature")
                 )
               ),
               fluidRow(
-                box(width = 12, title = "Regions Table", DTOutput("roi_table"),
-                    downloadButton("roi_download", "Download"))
+                box(width = 12, title = "Regions Table",
+                    DTOutput("roi_table"),
+                    downloadButton("roi_download", "Download"),
+                    textInput("roi_list_name", "Name for new ROI set"),
+                    actionButton("save_roi_list", "Save ROI Set")
+                )
               )
       ),
 
@@ -67,8 +84,6 @@ ui <- dashboardPage(
               fluidRow(
                 box(width = 4, title = "Create ROI Sets",
                     uiOutput("roi_select_ui"),
-                    textInput("roi_list_name", "Name for new ROI set"),
-                    actionButton("save_roi_list", "Save ROI Set")
                 ),
                 box(width = 8, title = "Saved ROI Sets",
                     DTOutput("roi_list_table"))
@@ -86,13 +101,30 @@ ui <- dashboardPage(
       # 3. BigWigs
       tabItem(tabName = "bigwig",
               fluidRow(
-                box(width = 6, title = "Upload BigWig Files",
-                    fileInput("bw_files", "Upload BigWigs", multiple = TRUE),
-                    textInput("bw_names", "Names (comma separated)")
+                box(width = 6, title = "Import BigWig Files",
+                    selectInput("bw_stranded", "Stranded experiment?", choices = c("no","rev","for")),
+                    selectInput("bw_select", "From", choices = c("Server","Upload")),
+                    conditionalPanel("input.bw_select == 'Server'",
+                                     textInput("bw_server_path", "File path", "test_data"),
+                                     uiOutput("bw_server")
+                    ),
+                    conditionalPanel("input.bw_select == 'Upload'",
+                                     fileInput("bw_files", "Upload BigWigs", multiple = TRUE)
+                    ),
+                    conditionalPanel("input.bw_stranded != 'no'",
+                                     conditionalPanel("input.bw_select == 'Server'",
+                                                      uiOutput("bw_server_rev")
+                                     ),
+                                     conditionalPanel("input.bw_select == 'Upload'",
+                                                      fileInput("bw_files_rev", "Upload Reverse BigWigs", multiple = TRUE)
+                                     ),
+                    ),
+                    textInput("bw_names", "Names (comma separated)"),
+                    textInput("bw_names_rm","Remove from names"),
+                    actionButton("load_bw", "Load BigWigs")
                 ),
-                box(width = 6, title = "Options",
-                    checkboxInput("bw_stranded", "Stranded experiment?", value = FALSE),
-                    radioButtons("strand_type", "Strand type", choices = c("rev", "for", "no"))
+                box(width = 6, title = "BigWig Files",
+                    DTOutput("bw_table")
                 )
               )
       ),
@@ -146,9 +178,10 @@ ui <- dashboardPage(
                 )
               )
       )
-    )
+  )
   )
 )
+
 
 # ------------------ SERVER ------------------
 server <- function(input, output, session) {
@@ -156,11 +189,28 @@ server <- function(input, output, session) {
   # --- Reactive store ---
   roi_data <- reactiveVal(NULL)   # holds imported regions (GRanges)
   roi_table_data <- reactiveVal(NULL)  # holds table version for DT
+  roi_sets <- reactiveValues(list = list())   # saved ROI sets
+  bwf <- reactiveValues(list = list())   # BigWig files
+  bwr <- reactiveValues(list = list())   # BigWig reverse files
 
   output$roi_server <- renderUI({
     choices = list.files(input$roi_server_path,pattern = "gtf$")
     tagList(
       selectInput("roi_server_file","Select file",choices = choices)
+    )
+  })
+
+  output$bw_server <- renderUI({
+    choices = list.files(input$bw_server_path,pattern = "bw$")
+    tagList(
+      selectInput("bw_server_files","Select bigWig files",choices = choices,multiple = T,selectize = T)
+    )
+  })
+
+  output$bw_server_rev <- renderUI({
+    choices = list.files(input$bw_server_path,pattern = "bw$")
+    tagList(
+      selectInput("bw_server_rev_files","Select reverse bigWig files",choices = choices,multiple = T,selectize = T)
     )
   })
 
@@ -196,7 +246,7 @@ server <- function(input, output, session) {
   observeEvent(input$roi_code_apply, {
     req(input$roi_code, roi_table_data())
     df <- roi_table_data()
-    df <- eval(parse(input$roi_code))
+    df <- eval(parse(text = input$roi_code))
 
     gr <- GenomicRanges::makeGRangesFromDataFrame(df,keep.extra.columns = T)
 
@@ -212,10 +262,12 @@ server <- function(input, output, session) {
     # Call your function
     gr_new <- getFeature(
       gr,
-      featureStart = input$start_feature,
-      featureEnd = input$end_feature,
-      flankStart = input$start_flank,
-      flankEnd = input$end_flank
+      start_feature = input$start_feature,
+      end_feature = input$end_feature,
+      start_flank = input$start_flank,
+      end_flank = input$end_flank,
+      start_direction = input$start_direction,
+      end_direction = input$end_direction
     )
 
     roi_data(gr_new)
@@ -238,6 +290,96 @@ server <- function(input, output, session) {
       write.table(df, file, sep="\t", row.names=FALSE, col.names=TRUE, quote=FALSE)
     }
   )
+
+  # UI: list current ROI set choices
+  output$roi_select_ui <- renderUI({
+    sets <- names(roi_sets$list)
+    selectInput("roi_set_select", "Select ROI sets", choices = sets, multiple = TRUE)
+  })
+
+  # Save current ROI into sets
+  observeEvent(input$save_roi_list, {
+    req(roi_data(), input$roi_list_name)
+    nm <- input$roi_list_name
+    roi_sets$list[[nm]] <- roi_data()
+    showNotification(paste("ROI set saved:", nm), type = "message")
+  })
+
+  # Show ROI sets table
+  output$roi_list_table <- renderDT({
+    sets <- roi_sets$list
+    if (length(sets) == 0) return(NULL)
+    df <- data.frame(
+      Name = names(sets),
+      Count = sapply(sets, length),
+      stringsAsFactors = FALSE
+    )
+    datatable(df, options = list(dom = "t"))
+  })
+
+  # Signal if single set is selected
+  output$single_set_selected <- reactive({
+    length(input$roi_set_select) == 1
+  })
+  outputOptions(output, "single_set_selected", suspendWhenHidden = FALSE)
+
+  # Apply flanking if single set selected
+  observeEvent(c(input$flank_up, input$flank_down), {
+    req(input$roi_set_select, length(input$roi_set_select) == 1)
+    nm <- input$roi_set_select
+    gr <- roi_sets$list[[nm]]
+    gr_flanked <- GenomicRanges::resize(gr, width(gr) + input$flank_up + input$flank_down,
+                                        fix = "center")
+    roi_sets$list[[nm]] <- gr_flanked
+    showNotification(paste("Flanking applied to set:", nm), type = "message")
+  })
+
+  # ------------------- STEP 3 (BigWig import) -------------------
+
+  # Import BigWig file
+  observeEvent(input$load_bw, {
+
+    if (input$bw_select == "Server" && input$bw_server_path != "") {
+      path <- file.path(input$bw_server_path,input$bw_server_files)
+      if (input$bw_stranded %in% c("rev","for")){
+        rev_path <- file.path(input$bw_server_path,input$bw_server_rev_files)
+      }
+    } else {
+      path <- input$bw_files$datapath
+      if (input$bw_stranded %in% c("rev","for")){
+        rev_path <- input$bw_files_rev$datapath
+      }
+    }
+
+    bw_names <- input$bw_names
+    if (bw_names == ""){
+      bw_names <- basename(path)
+    }
+    bw_names <- bw_names |> str_remove(input$bw_names_rm)
+
+    bwf_import <- importBWlist(bwf = path, names = bw_names)
+    bwf$list <- (bwf_import)
+
+    if (input$bw_stranded %in% c("rev","for")){
+      bwr_import <- importBWlist(bwf = rev_path, names = bw_names, selection = roi_data())
+      bwr$list <- bwr_import
+    }
+
+    showNotification("BigWigs imported", type = "message")
+  })
+
+  # Show imported BigWigs
+  output$bw_table <- renderDT({
+    bf <- bwf$list
+    br <- bwf$list
+    if (length(bf) == 0) return(NULL)
+    df <- data.frame(
+      Forward = names(bf),
+      Reverse = names(br),
+      stringsAsFactors = FALSE
+    )
+    datatable(df, options = list(dom = "t", scrollX = TRUE))
+  })
 }
 
 shinyApp(ui, server)
