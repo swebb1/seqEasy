@@ -22,7 +22,7 @@ source("../../R/mplot.R")
 
 # ------------------ UI ------------------
 ui <- dashboardPage(
-  dashboardHeader(title = "Genomic ROI Explorer"),
+  dashboardHeader(title = "SeqEasy"),
   dashboardSidebar(
     sidebarMenu(
       menuItem("1. Regions of Interest", tabName = "roi", icon = icon("dna")),
@@ -154,16 +154,15 @@ ui <- dashboardPage(
       tabItem(tabName = "heatmap",
               fluidRow(
                 box(width = 4, title = "Heatmap Options",
-                    sliderInput("max_q", "Max quantile", min = 0.8, max = 1, value = 0.99),
-                    sliderInput("min_q", "Min quantile", min = 0, max = 0.2, value = 0),
-                    selectInput("col_fun", "Color function", choices = c("red","bl2rd","red0")),
-                    checkboxInput("log2mat", "Apply log2 transform", FALSE),
-                    actionButton("draw_heatmaps", "Draw Heatmaps"),
-                    downloadButton("download_heatmap", "Download Heatmap")
+                    uiOutput("heatmap_selectUI"),
+                    uiOutput("heatmapUI"),
+                    actionButton("gen_heatmaps", "Generate Heatmaps")
                 ),
                 box(width = 8, title = "Heatmap Viewer",
+                    uiOutput("heatmap_drawUI"),
+                    actionButton("draw_heatmaps","Draw Heatmaps"),
                     plotOutput("heatmap_plot"),
-                    InteractiveComplexHeatmapOutput("interactive_hm")
+                    downloadButton("download_heatmap", "Download Heatmap")
                 )
               )
       ),
@@ -198,6 +197,8 @@ server <- function(input, output, session) {
   bwf <- reactiveValues(list = list())   # BigWig files
   bwr <- reactiveValues(list = list())   # BigWig reverse files
   matList_sets <- reactiveValues(list = list())
+  hml_data <- reactiveVal(list())
+  hml_sub_data <- reactiveVal(list())
 
   output$roi_server <- renderUI({
     choices = list.files(input$roi_server_path,pattern = "gtf$")
@@ -222,7 +223,7 @@ server <- function(input, output, session) {
 
   output$matrixUI <- renderUI({
     tagList(
-      selectInput("matrix_type","Plot type",choices = c("Feature","Meta","Combined")),
+      selectInput("matrix_type","Plot type",choices = c("Meta","Combined")),
       conditionalPanel("input.matrix_type == 'Combined'",
                        selectInput("matrix_grl_combined","Select ROI list", choices = names(roi_sets$list),multiple = T,selectize = T),
       ),
@@ -241,6 +242,38 @@ server <- function(input, output, session) {
       selectInput("matrix_strand","Stranded",choices = c("no","for","rev")),
       selectInput("matrix_mode","Mode",choices = c("coverage","w0","weighted","absolute")),
       selectInput("matrix_smooth","Smooth",choices = c("T","F")),
+    )
+  })
+
+  output$heatmap_selectUI <- renderUI({
+    tagList(
+      selectInput("hm_matl","Select matrix set",choices = names(matList_sets$list),selectize = T)
+    )
+  })
+
+  output$heatmapUI <- renderUI({
+    tagList(
+      selectInput("hm_select", "Select samples",choices = names(matList_sets$list[[input$hm_matl]]), multiple = T,selectize = T),
+      numericInput("hm_min_q","Minimum quantile",min = 0,max = 0.99,value=0),
+      numericInput("hm_max_q","Maximum quantile",min = 0.01,max = 1,value=0.99),
+      selectInput("hm_col_fun","Heatmap Colours", choices = c("red","red0","bl2red")),
+      selectInput("hm_rownames","Show row names", choices = c(T,F)),
+      textInput("hm_wins","Window lengths"),
+      textInput("hm_win_labels","Window labels"),
+      textInput("hm_max_y","Maximum y-axis",value="auto"),
+      textInput("hm_min_y","Minimum y-axis",value="auto"),
+      selectInput("hm_summarise", "Summarise by", choices = c("mean","median"),selected="mean"),
+      textInput("hm_axis_labels","X-axis labels",value=""),
+      numericInput("hm_km","K-means clusters",value=1),
+      selectInput("hm_log2","Apply log2", choices = c(T,F), selected=F),
+      selectInput("hm_split","Split by annotation",choices = c(T,F), selected=F),
+      textInput("hm_split_cols","Annotation colours",value="")
+    )
+  })
+
+  output$heatmap_drawUI <- renderUI({
+    tagList(
+      selectInput("hm_draw_select", "Select samples",choices = names(hml_data()),multiple = T,selectize = T),
     )
   })
 
@@ -471,6 +504,56 @@ server <- function(input, output, session) {
     )
     datatable(df, options = list(dom = "t", scrollX = TRUE))
   })
+
+  # ------------------- STEP 5 (Heatmap: draw heatmaps) -------------------
+
+  observeEvent(input$gen_heatmaps, {
+
+    wins = strsplit(input$hm_wins,",") |> unlist() |> as.numeric() |> as.list()
+    names(wins) = strsplit(input$hm_win_labels,",") |> unlist() |> as.list()
+
+    axis_labels = strsplit(input$hm_axis_labels,",") |> unlist()
+
+    if(input$hm_min_y == "auto" | input$hm_max_y == "auto"){
+      ylim = NULL
+    }
+    else{
+      ylim = c(input$hm_min_y,input$hm_max_y) |> as.numeric()
+    }
+
+    hml <- hmList(matl = matList_sets$list[[input$hm_matl]][input$hm_select],
+                       wins = wins,
+                       win_labels = names(wins),
+                       #max_quantile = input$hm_max_q,
+                       #min_quantile = input$hm_min_q,
+                       #col_fun = input$hm_col_fun,
+                       #show_row_names = input$hm_rownames |> as.logical(),
+                       #ylim = ylim,
+                       #summarise_by = input$hm_summarise,
+                       #axis_labels = axis_labels,
+                       #row_km = input$hm_row_km,
+                       #log2 = input$hm_log2 |> as.logical()
+                  )
+
+      hml_data(hml)
+      showNotification(paste("Heatmap list generated"), type = "message")
+    })
+
+    output$heatmap_plot <- renderPlot({
+      hml <- hml_sub_data()
+
+      if(input$hm_split){
+        #hm <- hml$rowAnno + hml[[a]] + hml[[b]]
+        NULL
+      }
+      else{
+        draw(hml[[1]]+hml[[2]],show_heatmap_legend=T,merge_legend=T)
+      }
+    })
+
+    observeEvent(input$draw_heatmaps, {
+      hml_sub_data(hml_data()[c(input$hm_draw_select)])
+    })
 
 }
 

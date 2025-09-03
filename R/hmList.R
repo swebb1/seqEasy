@@ -75,8 +75,8 @@ hmList <- function(matl, wins, split = NULL, split_cols, max_quantile = 0.99, mi
     matl <- lapply(matl, function(x) log2(x + 1))
   }
 
-  common_min <- quantile(unlist(matl), min_quantile)
-  common_max <- quantile(unlist(matl), max_quantile)
+  common_min <- quantile(unlist(matl), min_quantile, na.rm=T)
+  common_max <- quantile(unlist(matl), max_quantile, na.rm=T)
   if (col_fun == "red") {
     col_fun <- circlize::colorRamp2(c(common_min, common_max), c("white", "red"))
   } else if (col_fun == "bl2rd") {
