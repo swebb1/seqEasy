@@ -60,13 +60,9 @@ matList <- function(bwf, bwr, names, grl, wins = list("Gene" = 10), mode = "cove
                     k = 10, ...) {
 
   fbw <- bwf
-  #fbw <- bwf |> future_map(~import(.x, format = "BigWig"))
-  #names(fbw) <- names
 
   if(strand %in% c("for", "rev")) {
     rbw <- bwr
-    #rbw <- bwr |> future_map(~import(.x, format = "BigWig"))
-    #names(rbw) <- names
 
     fgrl = grl |> map(~subset(.x, strand(.x) == "+"))
     rgrl = grl |> map(~subset(.x, strand(.x) == "-"))
@@ -123,7 +119,7 @@ matList <- function(bwf, bwr, names, grl, wins = list("Gene" = 10), mode = "cove
         rownames(mat) <- c(fgrl[[1]]$name, rgrl[[1]]$name)
       }
       else if(strand == "for") {
-        fmat <- normalizeToMatrix(fbw[[s]], fgrl[[1]], extend = extend, value_column = "score", k = wins[.y],
+        fmat <- normalizeToMatrix(fbw[[s]], fgrl[[1]], extend = extend, value_column = "score", k = wins[1],
                                   mean_mode = mode, smooth = smooth, w = w, include_target = include_target,
                                   target_ratio = target_ratio, ...)
         rmat <- normalizeToMatrix(rbw[[s]], rgrl[[1]], extend = extend, value_column = "score", k = wins[1],
@@ -134,7 +130,7 @@ matList <- function(bwf, bwr, names, grl, wins = list("Gene" = 10), mode = "cove
         rownames(mat) <- c(fgrl[[1]]$name, rgrl[[1]]$name)
       }
       else if(strand == "no") {
-        mat <- normalizeToMatrix(fbw[[s]], grl[[1]], extend = extend, value_column = "score", k = wins[.y],
+        mat <- normalizeToMatrix(fbw[[s]], grl[[1]], extend = extend, value_column = "score", k = wins[1],
                                  mean_mode = mode, smooth = smooth, w = w, include_target = include_target,
                                  target_ratio = target_ratio, ...)
         rownames(mat) <- grl[[1]]$name

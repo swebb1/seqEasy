@@ -102,7 +102,7 @@ ui <- dashboardPage(
       tabItem(tabName = "bigwig",
               fluidRow(
                 box(width = 6, title = "Import BigWig Files",
-                    selectInput("bw_stranded", "Stranded experiment?", choices = c("no","rev","for")),
+                    selectInput("bw_stranded", "Stranded experiment?", choices = c("Yes","No")),
                     selectInput("bw_select", "From", choices = c("Server","Upload")),
                     conditionalPanel("input.bw_select == 'Server'",
                                      textInput("bw_server_path", "File path", "test_data"),
@@ -111,7 +111,7 @@ ui <- dashboardPage(
                     conditionalPanel("input.bw_select == 'Upload'",
                                      fileInput("bw_files", "Upload BigWigs", multiple = TRUE)
                     ),
-                    conditionalPanel("input.bw_stranded != 'no'",
+                    conditionalPanel("input.bw_stranded == 'Yes'",
                                      conditionalPanel("input.bw_select == 'Server'",
                                                       uiOutput("bw_server_rev")
                                      ),
@@ -132,15 +132,20 @@ ui <- dashboardPage(
       # 4. Matrices
       tabItem(tabName = "matrix",
               fluidRow(
-                box(width = 4, title = "Generate Matrices",
-                    textAreaInput("extra_opts", "Additional normalizeToMatrix options", ""),
+                box(width = 6, title = "Generate Matrices",
+                    uiOutput("matrixUI"),
+                    textAreaInput("matrix_opts", "Additional normalizeToMatrix options", ""),
+                    textInput("matrix_name", "Matrix Name", value = "matrix_list"),
                     actionButton("gen_matrix", "Generate Matrices")
                 ),
-                box(width = 8, title = "Log2 Ratios",
+                box(width = 6, title = "Log2 Ratios",
                     selectInput("mat1", "Sample 1", choices = NULL),
                     selectInput("mat2", "Sample 2", choices = NULL),
                     numericInput("pseudo", "Pseudo count", 0.1),
                     actionButton("add_log2", "Add log2 ratio")
+                ),
+                box(width = 4, title = "Matrices",
+                    DTOutput("matrix_table")
                 )
               )
       ),
@@ -192,6 +197,7 @@ server <- function(input, output, session) {
   roi_sets <- reactiveValues(list = list())   # saved ROI sets
   bwf <- reactiveValues(list = list())   # BigWig files
   bwr <- reactiveValues(list = list())   # BigWig reverse files
+  matList_sets <- reactiveValues(list = list())
 
   output$roi_server <- renderUI({
     choices = list.files(input$roi_server_path,pattern = "gtf$")
@@ -211,6 +217,30 @@ server <- function(input, output, session) {
     choices = list.files(input$bw_server_path,pattern = "bw$")
     tagList(
       selectInput("bw_server_rev_files","Select reverse bigWig files",choices = choices,multiple = T,selectize = T)
+    )
+  })
+
+  output$matrixUI <- renderUI({
+    tagList(
+      selectInput("matrix_type","Plot type",choices = c("Feature","Meta","Combined")),
+      conditionalPanel("input.matrix_type == 'Combined'",
+                       selectInput("matrix_grl_combined","Select ROI list", choices = names(roi_sets$list),multiple = T,selectize = T),
+      ),
+      conditionalPanel("input.matrix_type != 'Combined'",
+                       selectInput("matrix_grl","Select ROI list", choices = names(roi_sets$list),multiple = F,selectize = T),
+                       numericInput("matrix_upstream","Extend upstream (bp)",min = 0,value = 100),
+                       numericInput("matrix_downstream","Extend downstream (bp)",min = 0,value = 500),
+                       numericInput("matrix_w","Window size for flanks (bp)",min = 0,value = 10),
+                       selectInput("matrix_target","Include target region?", choices = c("T","F")),
+                       conditionalPanel("input.matrix_target == 'T",
+                                        numericInput("matrix_ratio","Target ratio",min = 0,value = 0.25)
+                       )
+      ),
+      numericInput("matrix_wins","Number of windows per feature",min = 0,value = 10),
+      selectInput("matrix_bw","Select samples", choices = names(bwf$list),multiple = T,selectize = T),
+      selectInput("matrix_strand","Stranded",choices = c("no","for","rev")),
+      selectInput("matrix_mode","Mode",choices = c("coverage","w0","weighted","absolute")),
+      selectInput("matrix_smooth","Smooth",choices = c("T","F")),
     )
   })
 
@@ -341,26 +371,30 @@ server <- function(input, output, session) {
 
     if (input$bw_select == "Server" && input$bw_server_path != "") {
       path <- file.path(input$bw_server_path,input$bw_server_files)
-      if (input$bw_stranded %in% c("rev","for")){
+      if (input$bw_stranded == "Yes"){
         rev_path <- file.path(input$bw_server_path,input$bw_server_rev_files)
       }
     } else {
       path <- input$bw_files$datapath
-      if (input$bw_stranded %in% c("rev","for")){
+      if (input$bw_stranded == "Yes"){
         rev_path <- input$bw_files_rev$datapath
       }
     }
 
-    bw_names <- input$bw_names
-    if (bw_names == ""){
+    if (input$bw_names == ""){
       bw_names <- basename(path)
     }
-    bw_names <- bw_names |> str_remove(input$bw_names_rm)
+    else{
+      bw_names <- strsplit(input$bw_names,",")[[1]]
+    }
+    if (input$bw_names_rm != ""){
+      bw_names <- bw_names |> str_remove(input$bw_names_rm)
+    }
 
     bwf_import <- importBWlist(bwf = path, names = bw_names)
     bwf$list <- (bwf_import)
 
-    if (input$bw_stranded %in% c("rev","for")){
+    if (input$bw_stranded == "Yes"){
       bwr_import <- importBWlist(bwf = rev_path, names = bw_names, selection = roi_data())
       bwr$list <- bwr_import
     }
@@ -380,6 +414,64 @@ server <- function(input, output, session) {
     )
     datatable(df, options = list(dom = "t", scrollX = TRUE))
   })
+
+  # ------------------- STEP 4 (Matrix: call matList) -------------------
+
+  # generate matrix list
+  observeEvent(input$gen_matrix, {
+
+    grl <- roi_sets$list[[input$matrix_grl]]
+    names(grl) <- input$matrix_grl
+
+    name <- input$matrix_name
+
+    if(input$matrix_type == "Combine"){
+
+      grl <- roi_sets$list[[input$matrix_grl_combined]]
+      names(grl) <- input$matrix_grl_combined
+
+      wins <- str_split(input$matrix_wins,",") |> unlist() |> as.list()
+      names(wins) <- names(grl)
+      ml <- NULL
+    }
+    if(input$matrix_type == "Meta"){
+
+      grl <- roi_sets$list[input$matrix_grl]
+
+      extend = c(input$matrix_upstream,input$matrix_downstream)
+      wins = list((sum(extend) / input$matrix_w) / (1 - input$matrix_ratio))
+      names(wins) = names(grl)
+
+      ml <- matList(bwf = bwf$list[input$matrix_bw],
+                    bwr = bwr$list[input$matrix_bw],
+                    names = input$matrix_bw,
+                    grl = grl,
+                    wins = wins,
+                    mode = input$matrix_mode,
+                    strand = input$matrix_strand,
+                    extend = extend,
+                    smooth = input$matrix_smooth |> as.logical(),
+                    w = input$matrix_w,
+                    include_target = input$matrix_target |> as.logical(),
+                    target_ratio = input$matrix_ratio)
+    }
+
+    matList_sets$list[[name]] <- ml
+    showNotification(paste("Matrix generated:",name), type = "message")
+
+  })
+
+  # Show generated Matrices
+  output$matrix_table <- renderDT({
+    mls <- matList_sets$list
+    if (length(mls) == 0) return(NULL)
+    df <- data.frame(
+      Name = names(mls),
+      stringsAsFactors = FALSE
+    )
+    datatable(df, options = list(dom = "t", scrollX = TRUE))
+  })
+
 }
 
 shinyApp(ui, server)
