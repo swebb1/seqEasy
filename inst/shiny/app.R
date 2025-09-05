@@ -4,14 +4,16 @@ library(shinydashboard)
 library(DT)
 library(GenomicRanges)
 library(rtracklayer)
+library(genomation)
 library(EnrichedHeatmap)
 library(ComplexHeatmap)
 library(InteractiveComplexHeatmap)
 library(ggplot2)
-library(dplyr)
 library(stringr)
 library(furrr)
 library(purrr)
+library(dplyr)
+
 
 # --- Source helper functions (you provided) ---
 source("../../R/getFeature.R")
@@ -50,7 +52,7 @@ ui <- dashboardPage(
                     actionButton("roi_load", "Load ROI")
                 ),
                 box(width = 6, title = "Filter or manipulate", status = "info",
-                    textInput("roi_code","Add code to subset or manipulate GRanges object",placeholder = "df |> filter(seqnames == 'chr1')"),
+                    textInput("roi_code","Add code to subset or manipulate GRanges object",placeholder = "filter(seqnames == 'chr1')"),
                     actionButton("roi_code_apply","Apply code"),
                     selectInput("start_feature", "Start feature", choices = c("TSS", "TES", "Exon")),
                     conditionalPanel("input.start_feature == 'Exon'",
@@ -139,7 +141,7 @@ ui <- dashboardPage(
                 box(width = 6, title = "Generate Matrices",
                     selectInput("matrix_select","Create matrix from:", choices = c("Generate","Load")),
                     conditionalPanel("input.matrix_select == 'Load'",
-                        textInput("matrix_path", "Matrix Directory", value = "test_data"),
+                                     textInput("matrix_path", "Matrix Directory", value = "test_data"),
 
                     ),
                     uiOutput("matrixUI")
@@ -168,15 +170,18 @@ ui <- dashboardPage(
       # 5. Heatmaps
       tabItem(tabName = "heatmap",
               fluidRow(
-                box(width = 4, title = "Heatmap Options",
+                box(width = 3, title = "Heatmap Options",
                     uiOutput("heatmap_selectUI"),
                     uiOutput("heatmapUI"),
                     actionButton("gen_heatmaps", "Generate Heatmaps")
                 ),
-                box(width = 8, title = "Heatmap Viewer",
+                box(width = 9, title = "Heatmap Viewer",
                     uiOutput("heatmap_drawUI"),
                     actionButton("draw_heatmaps","Draw Heatmaps"),
-                    plotOutput("heatmap_plot"),
+                    div(
+                      style = "max-height:500px; overflow-x:auto; background-color:#f8f9fa; padding:5px; border:1px solid #ddd;",
+                      plotOutput("heatmap_plot")
+                    ),
                     downloadButton("download_heatmap", "Download Heatmap")
                 )
               )
@@ -197,7 +202,7 @@ ui <- dashboardPage(
                 )
               )
       )
-  )
+    )
   )
 )
 
@@ -280,14 +285,14 @@ server <- function(input, output, session) {
         textInput("matrix_name", "Matrix Name", value = "matrix_list"),
         actionButton("gen_matrix", "Generate Matrices")
       )}
-      else{
-        choices = list.files(input$matrix_path,pattern = "rds$",ignore.case = T)
-        tagList(
-          selectInput("matrix_rds", "Matrix RDS file",choices = choices,multiple = F),
-          textInput("matrix_rds_name", "Name for matrix set",value = "matrix"),
-          actionButton("load_matrix", "Load Matrices")
-        )
-      }
+    else{
+      choices = list.files(input$matrix_path,pattern = "rds$",ignore.case = T)
+      tagList(
+        selectInput("matrix_rds", "Matrix RDS file",choices = choices,multiple = F),
+        textInput("matrix_rds_name", "Name for matrix set",value = "matrix"),
+        actionButton("load_matrix", "Load Matrices")
+      )
+    }
   })
 
 
@@ -298,18 +303,23 @@ server <- function(input, output, session) {
   })
 
   output$heatmapUI <- renderUI({
+    choices = names(matList_sets$list[[input$hm_matl]])
+    choices = choices[!choices %in% "attributes"]
+    hm_wins = matList_sets$list[[input$hm_matl]]$attributes$wins |> unlist() |> paste(collapse=",")
+    hm_win_labels = matList_sets$list[[input$hm_matl]]$attributes$wins |> names() |> paste(collapse=",")
+    hm_axis_labels = matList_sets$list[[input$hm_matl]]$attributes$labels
     tagList(
-      selectInput("hm_select", "Select samples",choices = names(matList_sets$list[[input$hm_matl]]), multiple = T,selectize = T),
+      selectInput("hm_select", "Select samples",choices =  choices, multiple = T,selectize = T),
       numericInput("hm_min_q","Minimum quantile",min = 0,max = 0.99,value=0),
       numericInput("hm_max_q","Maximum quantile",min = 0.01,max = 1,value=0.99),
       selectInput("hm_col_fun","Heatmap Colours", choices = c("red","red0","bl2red")),
       selectInput("hm_rownames","Show row names", choices = c(T,F)),
-      textInput("hm_wins","Window lengths"),
-      textInput("hm_win_labels","Window labels"),
+      textInput("hm_wins","Window lengths", value = hm_wins),
+      textInput("hm_win_labels","Window labels", value = hm_win_labels),
       textInput("hm_max_y","Maximum y-axis",value="auto"),
       textInput("hm_min_y","Minimum y-axis",value="auto"),
       selectInput("hm_summarise", "Summarise by", choices = c("mean","median"),selected="mean"),
-      textInput("hm_axis_labels","X-axis labels",value=""),
+      textInput("hm_axis_labels","X-axis labels",value=hm_axis_labels),
       numericInput("hm_km","K-means clusters",value=1),
       selectInput("hm_log2","Apply log2", choices = c(T,F), selected=F),
       selectInput("hm_split","Split by annotation",choices = c(T,F), selected=F),
@@ -335,14 +345,15 @@ server <- function(input, output, session) {
     # Auto-detect format
     ext <- tools::file_ext(path)
     gr <- NULL
-    if (ext %in% c("bed", "tsv", "txt")) {
-      df <- read.delim(path, header = FALSE)
-      colnames(df)[1:3] <- c("chr","start","end")
+    if (ext %in% c("bed")) {
+      gr <- genomation::readBed(path)
+    } else if (ext %in% c("tsv", "txt")) {
+      df <- read.delim(path, header = TRUE)
       gr <- GenomicRanges::GRanges(df)
     } else if (ext %in% c("gtf", "gff")) {
       gr <- rtracklayer::import(path)
     } else if (ext %in% c("rds", "RDS")) {
-        gr <- readRDS(path)
+      gr <- readRDS(path)
     } else {
       showNotification("Unsupported format", type = "error")
       return(NULL)
@@ -357,7 +368,7 @@ server <- function(input, output, session) {
   observeEvent(input$roi_code_apply, {
     req(input$roi_code, roi_table_data())
     df <- roi_table_data()
-    df <- eval(parse(text = paste("df <- ",input$roi_code)))
+    df <- eval(parse(text = paste("df |>",input$roi_code)))
 
     gr <- GenomicRanges::makeGRangesFromDataFrame(df,keep.extra.columns = T)
 
@@ -562,7 +573,7 @@ server <- function(input, output, session) {
       grl <- roi_sets$list[input$matrix_grl]
 
       extend = c(input$matrix_upstream,input$matrix_downstream)
-      wins = list((sum(extend) / input$matrix_w) / (1 - input$matrix_ratio))
+      wins = list(( (sum(extend) / input$matrix_w) / (1 - input$matrix_ratio)) - (sum(extend) / input$matrix_w ))
       names(wins) = names(grl)
 
       ml <- matList(bwf = bwf$list[input$matrix_bw],
@@ -576,7 +587,8 @@ server <- function(input, output, session) {
                     smooth = input$matrix_smooth |> as.logical(),
                     w = input$matrix_w,
                     include_target = input$matrix_target |> as.logical(),
-                    target_ratio = input$matrix_ratio)
+                    target_ratio = input$matrix_ratio,
+                    attributes = T)
     }
 
     matList_sets$list[[name]] <- ml
@@ -645,38 +657,49 @@ server <- function(input, output, session) {
     }
 
     hml <- hmList(matl = matList_sets$list[[input$hm_matl]][input$hm_select],
-                       wins = wins,
-                       win_labels = names(wins),
-                       #max_quantile = input$hm_max_q,
-                       #min_quantile = input$hm_min_q,
-                       #col_fun = input$hm_col_fun,
-                       #show_row_names = input$hm_rownames |> as.logical(),
-                       #ylim = ylim,
-                       #summarise_by = input$hm_summarise,
-                       #axis_labels = axis_labels,
-                       #row_km = input$hm_row_km,
-                       #log2 = input$hm_log2 |> as.logical()
-                  )
+                  wins = wins,
+                  win_labels = names(wins),
+                  max_quantile = input$hm_max_q,
+                  min_quantile = input$hm_min_q,
+                  col_fun = input$hm_col_fun,
+                  #show_row_names = input$hm_rownames |> as.logical(),
+                  ylim = ylim,
+                  summarise_by = input$hm_summarise,
+                  axis_labels = axis_labels,
+                  row_km = input$hm_row_km,
+                  log2 = input$hm_log2 |> as.logical()
+    )
 
-      hml_data(hml)
-      showNotification(paste("Heatmap list generated"), type = "message")
-    })
+    hml_data(hml)
+    showNotification(paste("Heatmap list generated"), type = "message")
+  })
 
-    output$heatmap_plot <- renderPlot({
-      hml <- hml_sub_data()
+  output$heatmap_plot <- renderPlot({
+    hml <- hml_sub_data()
 
-      if(input$hm_split){
-        #hm <- hml$rowAnno + hml[[a]] + hml[[b]]
-        NULL
+    if(length(hml) == 0){
+      NULL
+    }
+
+    if(input$hm_split){
+      #hm <- hml$rowAnno + hml[[a]] + hml[[b]]
+      NULL
+    }
+    else{
+      l = length(hml)
+      command = "hml[[1]]"
+      if(l > 1){
+        for(i in 2:l){
+          command = paste0(command," + hml[[",i,"]]")
+        }
       }
-      else{
-        draw(hml[[1]]+hml[[2]],show_heatmap_legend=T,merge_legend=T)
-      }
-    })
+      eval(parse(text = paste("draw(",command,",show_heatmap_legend=T,merge_legend=T)")))
+    }
+  })
 
-    observeEvent(input$draw_heatmaps, {
-      hml_sub_data(hml_data()[c(input$hm_draw_select)])
-    })
+  observeEvent(input$draw_heatmaps, {
+    hml_sub_data(hml_data()[c(input$hm_draw_select)])
+  })
 
 }
 

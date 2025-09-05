@@ -17,11 +17,12 @@
 #' @param strand Strand specificity: \code{"rev"} (default) for reverse alignment, \code{"for"} for forward, or \code{"no"} to ignore strand.
 #' @param smooth Logical; if \code{TRUE}, applies smoothing in \code{normalizeToMatrix}.
 #' @param extend Integer; number of base pairs to extend around each region.
-#' @param w Optional integer; smoothing window size (used when \code{smooth = TRUE}).
+#' @param w Optional integer; Window size used for flanking regions.
 #' @param include_target Logical; whether to include the target region in the matrix.
 #' @param target_ratio Numeric between 0 and 1; controls the fraction of the matrix allocated to the target region.
 #' @param k Integer; number of bins for the matrix (used only if \code{wins} has length 1).
-#' @param keep (Unused) Optional parameter placeholder for future development.
+#' @param attributes add a list item titled "attributes" with information regarding the windows used.
+#' @param ... Add any other normalizeToMatrix parameters.
 #'
 #' @return A named list of matrices, either as \code{EnrichedHeatmap::normalizedMatrix} objects
 #' or base R numeric matrices, depending on the \code{output} parameter.
@@ -57,7 +58,7 @@
 #' @export
 matList <- function(bwf, bwr, names, grl, wins = list("Gene" = 10), mode = "coverage", output = "norm.matrix",
                     strand = "rev", smooth = FALSE, extend = 0, w, include_target = TRUE, target_ratio = 0.5,
-                    k = 10, ...) {
+                    k = 10,attributes = F, ...) {
 
   fbw <- bwf
 
@@ -142,6 +143,18 @@ matList <- function(bwf, bwr, names, grl, wins = list("Gene" = 10), mode = "cove
   }
 
   names(matl) <- names
+
+  if(attributes == T){
+    if(length(wins) > 1){
+      matl$attributes$wins <- wins
+    }
+    else{
+      matl$attributes$wins <- c(list("Upstream"=length(attr(matl[[1]],"upstream_index"))),
+                                wins,
+                                list("Downstream"=length(attr(matl[[1]],"downstream_index"))))
+      matl$attributes$labels <- paste0(c( paste0( "-", attr( matl[[1]],"extend")[1]), "start", "end", paste0( "+", attr( matl[[1]], "extend")[2])),collapse=",")
+    }
+  }
 
   if(output == "norm.matrix") {
     matl
