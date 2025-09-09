@@ -1,5 +1,16 @@
 ISSUES
 
-- Add name column to ROI
-- Add combined plots
-- Add mplots
+
+## Add combined plots
+
+## Add mplots
+
+## Heatmaps
+
+- kmeans clustering
+
+## Annotation
+
+- Add anno without splitting (keep order or kmeans?)
+- Not sure the colours in Enriched meta are correct
+- NA colours

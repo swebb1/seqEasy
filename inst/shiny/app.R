@@ -7,13 +7,13 @@ library(rtracklayer)
 library(genomation)
 library(EnrichedHeatmap)
 library(ComplexHeatmap)
-library(InteractiveComplexHeatmap)
 library(ggplot2)
 library(stringr)
 library(furrr)
 library(purrr)
 library(dplyr)
-
+library(readr)
+library(tibble)
 
 # --- Source helper functions (you provided) ---
 source("../../R/getFeature.R")
@@ -31,8 +31,9 @@ ui <- dashboardPage(
       menuItem("2. ROI Lists", tabName = "roi_list", icon = icon("list")),
       menuItem("3. Import BigWigs", tabName = "bigwig", icon = icon("file-import")),
       menuItem("4. Matrices", tabName = "matrix", icon = icon("th")),
-      menuItem("5. Heatmaps", tabName = "heatmap", icon = icon("th-large")),
-      menuItem("6. Meta Plots", tabName = "metaplot", icon = icon("chart-line"))
+      menuItem("5. Annotation", tabName = "annotation", icon = icon("pen")),
+      menuItem("6. Heatmaps", tabName = "heatmap", icon = icon("th-large")),
+      menuItem("7. Meta Plots", tabName = "metaplot", icon = icon("chart-line"))
     )
   ),
   dashboardBody(
@@ -167,12 +168,44 @@ ui <- dashboardPage(
               )
       ),
 
-      # 5. Heatmaps
+      # 5. Annotations
+      tabItem(tabName = "annotation",
+            fluidRow(
+              box(width = 6, title = "Load Annotation",
+                  selectInput("anno_select", "From", choices = c("Directory","Upload")),
+                  conditionalPanel("input.anno_select == 'Directory'",
+                                   textInput("anno_server_path", "Path", "test_data"),
+                                   uiOutput("anno_serverUI"),
+                                   uiOutput("anno_select_colsUI")
+                  ),
+                  conditionalPanel("input.anno_select == 'Upload'",
+                                   fileInput("anno_file", "Upload Dataframe")
+                  ),
+                  textInput("anno_name", "Annotation Name",value = "Annotation"),
+                  actionButton("anno_load", "Load annotation file")
+              ),
+              box(width = 6, title = "Annotation Table",
+                  DTOutput("anno_list_table"),
+                  DTOutput("anno_select_table"),
+              )
+            ),
+            fluidRow(
+              box(width = 6, title = "Annotation Colour Table",
+                  DTOutput("anno_select_cols_table")
+              ),
+              box(width = 6, title = "Annotation Colours",
+                  plotOutput("anno_select_cols_plot")
+              )
+            )
+      ),
+
+      # 6. Heatmaps
       tabItem(tabName = "heatmap",
               fluidRow(
                 box(width = 3, title = "Heatmap Options",
                     uiOutput("heatmap_selectUI"),
                     uiOutput("heatmapUI"),
+                    uiOutput("hm_annoUI"),
                     actionButton("gen_heatmaps", "Generate Heatmaps")
                 ),
                 box(width = 9, title = "Heatmap Viewer",
@@ -187,7 +220,7 @@ ui <- dashboardPage(
               )
       ),
 
-      # 6. Meta Plots
+      # 7. Meta Plots
       tabItem(tabName = "metaplot",
               fluidRow(
                 box(width = 4, title = "Metaplot Options",
@@ -217,6 +250,8 @@ server <- function(input, output, session) {
   bwf <- reactiveValues(list = list())   # BigWig files
   bwr <- reactiveValues(list = list())   # BigWig reverse files
   matList_sets <- reactiveValues(list = list())
+  anno_sets <- reactiveValues(list = list())
+  anno_col_sets <- reactiveValues(list = list())
   hml_data <- reactiveVal(list())
   hml_sub_data <- reactiveVal(list())
 
@@ -295,6 +330,23 @@ server <- function(input, output, session) {
     }
   })
 
+  output$anno_serverUI <- renderUI({
+    choices = list.files(input$anno_server_path,
+                         pattern = "\\.(tsv|txt|csv)$",
+                         ignore.case = TRUE)
+    tagList(
+      selectInput("anno_server_file","Select file",choices = choices)
+    )
+  })
+
+  output$anno_select_colsUI <- renderUI({
+    choices = list.files(input$anno_server_path,
+                         pattern = "\\.(tsv)$",
+                         ignore.case = TRUE)
+    tagList(
+      selectInput("anno_server_col_file","Select colour file",choices = c("default",choices))
+    )
+  })
 
   output$heatmap_selectUI <- renderUI({
     tagList(
@@ -308,6 +360,8 @@ server <- function(input, output, session) {
     hm_wins = matList_sets$list[[input$hm_matl]]$attributes$wins |> unlist() |> paste(collapse=",")
     hm_win_labels = matList_sets$list[[input$hm_matl]]$attributes$wins |> names() |> paste(collapse=",")
     hm_axis_labels = matList_sets$list[[input$hm_matl]]$attributes$labels
+    anno_choices = names(anno_sets$list)
+
     tagList(
       selectInput("hm_select", "Select samples",choices =  choices, multiple = T,selectize = T),
       numericInput("hm_min_q","Minimum quantile",min = 0,max = 0.99,value=0),
@@ -316,14 +370,22 @@ server <- function(input, output, session) {
       selectInput("hm_rownames","Show row names", choices = c(T,F)),
       textInput("hm_wins","Window lengths", value = hm_wins),
       textInput("hm_win_labels","Window labels", value = hm_win_labels),
-      textInput("hm_max_y","Maximum y-axis",value="auto"),
       textInput("hm_min_y","Minimum y-axis",value="auto"),
+      textInput("hm_max_y","Maximum y-axis",value="auto"),
       selectInput("hm_summarise", "Summarise by", choices = c("mean","median"),selected="mean"),
       textInput("hm_axis_labels","X-axis labels",value=hm_axis_labels),
       numericInput("hm_km","K-means clusters",value=1),
       selectInput("hm_log2","Apply log2", choices = c(T,F), selected=F),
-      selectInput("hm_split","Split by annotation",choices = c(T,F), selected=F),
-      textInput("hm_split_cols","Annotation colours",value="")
+      selectInput("hm_anno","Add annotation",choices = c("No",anno_choices), selected="F")
+    )
+  })
+
+  output$hm_annoUI <- renderUI({
+    choices = names(anno_sets$list[[input$hm_anno]])[-1]
+    conditionalPanel("input.hm_anno != 'No'",
+      selectInput("hm_anno_select","Select Annotations",choices = choices, multiple = T,selectize = T),
+      selectInput("hm_anno_filter","Filter by annotation", choices = c("Yes","No")),
+      selectInput("hm_anno_split","Split by annotation", choices = c("Yes","No")),
     )
   })
 
@@ -640,9 +702,138 @@ server <- function(input, output, session) {
     showNotification(paste("Matrix loaded:",name), type = "message")
   })
 
-  # ------------------- STEP 5 (Heatmap: draw heatmaps) -------------------
+  # ------------------- STEP 5 (Annotation: load annotations) -------------------
+
+  observeEvent(input$anno_load, {
+
+    if (input$anno_select == "Directory" && input$anno_server_file != "") {
+      path <- file.path(input$anno_server_path,input$anno_server_file)
+    } else {
+      path <- input$anno_file$datapath
+    }
+
+    # Auto-detect format
+    ext <- tools::file_ext(path)
+    anno <- NULL
+    if (ext %in% c("tsv")) {
+      anno <- read_tsv(path, col_names = T)
+    } else if (ext %in% c("txt")) {
+      anno <- read_delim(path, col_names = T , delim = " ")
+    } else if (ext %in% c("csv")) {
+      anno <- read_csv(path, col_names = T)
+    } else {
+      showNotification("Unsupported format", type = "error")
+      return(NULL)
+    }
+
+    #anno <- anno |> tibble::column_to_rownames(colnames(anno)[1])
+
+    anno_sets$list[[input$anno_name]] <- anno
+
+    cols <- NULL
+    if(!input$anno_server_col_file=="default"){
+      cols_df <- read_tsv(file.path(input$anno_server_path,input$anno_server_col_file),col_names = c("Column","Value","Colour"))
+
+      cols <- cols_df |>
+        mutate(Column = factor(Column,levels=Column |> unique())) |>
+        group_by(Column) |>
+        summarise(vec = list(setNames(Colour, Value)), .groups = "drop") |>
+        deframe()
+    }
+
+    anno_col_sets$list[[input$anno_name]] <- cols
+
+    showNotification(paste("Annotation loaded:",input$anno_name), type = "message")
+  })
+
+  # Show Anno sets table
+  output$anno_list_table <- renderDT({
+    sets <- anno_sets$list
+    if (length(sets) == 0) return(NULL)
+    df <- data.frame(
+      Name = names(sets),
+      stringsAsFactors = FALSE
+    )
+    datatable(df, options = list(dom = "t"))
+  })
+
+  ## Show selected Anno
+  output$anno_select_table <- renderDT({
+    req(input$anno_list_table_rows_selected)
+
+    # find which row was clicked
+    row_idx <- input$anno_list_table_rows_selected
+    item_name <- names(anno_sets$list)[row_idx]
+
+    # extract that object
+    df <- anno_sets$list[[item_name]] |> as.data.frame()
+
+    datatable(df, options = list(scrollX = TRUE))
+  })
+
+  ## Show selected Anno colours table
+  output$anno_select_cols_table <- renderDT({
+    req(input$anno_list_table_rows_selected)
+
+    # find which row was clicked
+    row_idx <- input$anno_list_table_rows_selected
+    item_name <- names(anno_col_sets$list)[row_idx]
+
+    # extract that object
+    al <- anno_col_sets$list[[item_name]]
+
+    df <- imap_dfr(al, ~ tibble(
+      Column = .y,
+      Value  = names(.x),
+      Colour = unname(.x)
+    )) |>
+      mutate(Column = factor(Column,levels = names(al)))
+
+    datatable(df, options = list(scrollX = TRUE))
+  })
+
+  ## Show selected Anno Colours
+  output$anno_select_cols_plot <- renderPlot({
+    req(input$anno_list_table_rows_selected)
+
+    # find which row was clicked
+    row_idx <- input$anno_list_table_rows_selected
+    item_name <- names(anno_sets$list)[row_idx]
+
+    # extract that object
+    al <- anno_col_sets$list[[item_name]]
+
+    ## Convert to dataframe
+    df_plot <- imap_dfr(al, ~ tibble(
+      Column = .y,
+      Value  = names(.x),
+      Colour = unname(.x)
+    )) |>
+      mutate(Column = factor(Column,levels = names(al)))
+
+    df_plot <- df_plot |>
+      group_by(Column) |>
+      mutate(y = row_number()) |>
+      ungroup()
+
+    ggplot(df_plot, aes(x = Column, y = -y, fill = Colour)) +
+      geom_tile(color = "black") +
+      geom_text(aes(label = Value), color = "black") +
+      scale_fill_identity() +
+      theme_minimal() +
+      theme(axis.title = element_blank(),
+            axis.text.y = element_blank(),
+            axis.ticks.y = element_blank())
+
+  })
+
+
+
+  # ------------------- STEP 6 (Heatmap: draw heatmaps) -------------------
 
   observeEvent(input$gen_heatmaps, {
+
+    matl = matList_sets$list[[input$hm_matl]][input$hm_select]
 
     wins = strsplit(input$hm_wins,",") |> unlist() |> as.numeric() |> as.list()
     names(wins) = strsplit(input$hm_win_labels,",") |> unlist() |> as.list()
@@ -653,23 +844,62 @@ server <- function(input, output, session) {
       ylim = NULL
     }
     else{
-      ylim = c(input$hm_min_y,input$hm_max_y) |> as.numeric()
+      ylim = c(input$hm_min_y,input$hm_max_y)
     }
 
-    hml <- hmList(matl = matList_sets$list[[input$hm_matl]][input$hm_select],
-                  wins = wins,
-                  win_labels = names(wins),
-                  max_quantile = input$hm_max_q,
-                  min_quantile = input$hm_min_q,
-                  col_fun = input$hm_col_fun,
-                  #show_row_names = input$hm_rownames |> as.logical(),
-                  ylim = ylim,
-                  summarise_by = input$hm_summarise,
-                  axis_labels = axis_labels,
-                  row_km = input$hm_row_km,
-                  log2 = input$hm_log2 |> as.logical()
-    )
+    if(input$hm_anno == "No"){
+      hml <- hmList(matl = matl,
+                    wins = wins,
+                    win_labels = names(wins),
+                    max_quantile = input$hm_max_q,
+                    min_quantile = input$hm_min_q,
+                    col_fun = input$hm_col_fun,
+                    show_row_names = input$hm_rownames |> as.logical(),
+                    ylim = ylim,
+                    summarise_by = input$hm_summarise,
+                    axis_labels = axis_labels,
+                    row_km = input$hm_row_km,
+                    log2 = input$hm_log2 |> as.logical()
+              )
+    }
+    else{
 
+      ## Filter by names in annotation file?
+      if(input$hm_anno_filter == "Yes"){
+       matl <- matl |> map(function(x){
+            x[anno_sets$list[[input$hm_anno]] |> pull(name),]
+       })
+      }
+
+      anno = data.frame(name = c(rownames(matl[[1]]))) |>
+        left_join(anno_sets$list[[input$hm_anno]],by="name") |>
+        column_to_rownames("name") |>
+        select(all_of(input$hm_anno_select))
+
+      anno_cols = anno_col_sets$list[[input$hm_anno]]
+      anno_cols = anno_cols[c(input$hm_anno_select)]
+      ## reorder list by anno select order
+
+      if(input$hm_anno_filter == "No"){
+        anno_cols = anno_cols |> map(function(x){x[["NA"]] ="grey";x})
+      }
+
+      hml <- hmList(matl = matl,
+                    wins = wins,
+                    win_labels = names(wins),
+                    max_quantile = input$hm_max_q,
+                    min_quantile = input$hm_min_q,
+                    col_fun = input$hm_col_fun,
+                    show_row_names = input$hm_rownames |> as.logical(),
+                    ylim = ylim,
+                    summarise_by = input$hm_summarise,
+                    axis_labels = axis_labels,
+                    row_km = input$hm_row_km,
+                    log2 = input$hm_log2 |> as.logical(),
+                    anno = anno,
+                    anno_cols = anno_cols
+              )
+    }
     hml_data(hml)
     showNotification(paste("Heatmap list generated"), type = "message")
   })
@@ -681,20 +911,15 @@ server <- function(input, output, session) {
       NULL
     }
 
-    if(input$hm_split){
-      #hm <- hml$rowAnno + hml[[a]] + hml[[b]]
-      NULL
-    }
-    else{
-      l = length(hml)
-      command = "hml[[1]]"
-      if(l > 1){
+    l = length(hml)
+    command = "hml[[1]]"
+    if(l > 1){
         for(i in 2:l){
           command = paste0(command," + hml[[",i,"]]")
         }
-      }
-      eval(parse(text = paste("draw(",command,",show_heatmap_legend=T,merge_legend=T)")))
     }
+    eval(parse(text = paste("draw(",command,",show_heatmap_legend=T,merge_legend=T)")))
+
   })
 
   observeEvent(input$draw_heatmaps, {

@@ -11,11 +11,11 @@
 #' @param wins A named integer vector specifying the number of bins (windows) that the
 #'        matrices in \code{matl} were normalized to for each feature type. The names
 #'        should correspond to the feature types (e.g., \code{c("Gene" = 10)}).
-#' @param split An optional \code{data.frame} used to split the rows of the heatmaps.
-#'        Each column in the data frame will define a way to split the rows.
-#' @param split_cols A named list specifying the colors for the levels of the splitting variable
-#'        provided in \code{split}. The names of the list should correspond to the column
-#'        names in the data frame used for splitting.
+#' @param anno An optional \code{data.frame} used to annotate the rows of the heatmaps.
+#'        Each column in the data frame will define a way to annotate the rows.
+#' @param anno_cols A named list specifying the colors for the levels of the annotation variable
+#'        provided in \code{anno}. The names of the list should correspond to the column
+#'        names in the data frame used for annotation
 #' @param max_quantile A numeric value between 0 and 1 specifying the upper quantile for
 #'        scaling the color map. Values above this quantile will be capped.
 #' @param min_quantile A numeric value between 0 and 1 specifying the lower quantile for
@@ -59,14 +59,15 @@
 #' # Generate a list of enriched heatmaps
 #' hm_list <- hmList(matl = mat_list, wins = wins_info)
 #'
-#' # Generate heatmaps with row splitting and custom colors
+#' # Generate heatmaps with row annotation and custom colors
 #' split_df <- data.frame(group = factor(rep(c("Group1", "Group2"), each = 10)))
 #' split_colors <- list("group" = c("Group1" = "blue", "Group2" = "green"))
-#' hm_list_split <- hmList(matl = mat_list, wins = wins_info, split = split_df,
-#'                         split_cols = split_colors)
+#' hm_list_split <- hmList(matl = mat_list, wins = wins_info, anno = anno_df,
+#'                         anno_cols = anno_colors)
 #' }
 #' @export
-hmList <- function(matl, wins, split = NULL, split_cols, max_quantile = 0.99, min_quantile = 0, col_fun = "red", show_row_names = TRUE, win_labels = NULL, ylim = NULL, summarise_by = "mean", axis_labels = "", row_km = 1, log2 = FALSE) {
+
+hmList <- function(matl, wins, anno = NULL, anno_cols = NULL, max_quantile = 0.99, min_quantile = 0, col_fun = "red", show_row_names = TRUE, win_labels = NULL, ylim = NULL, summarise_by = "mean", axis_labels = "", row_km = 1, log2 = FALSE) {
 
   ## ColourMap
   reds <- RColorBrewer::brewer.pal(n = 9, name = "Reds")
@@ -103,9 +104,19 @@ hmList <- function(matl, wins, split = NULL, split_cols, max_quantile = 0.99, mi
     win_labels <- names(wins)
   }
 
-  if (!is.null(split)) {
+  if (!is.null(anno)) {
 
-    rowAnno <- rowAnnotation(df = split, col = split_cols, show_legend = FALSE)
+    if(is.null(anno_cols)){
+      anno_cols <- names(anno) |> map(function(x){
+        lvls = anno[,x] |> unique()
+        cols = RColorBrewer::brewer.pal(n = 9, name = "Set3")[1:length(lvls)]
+        names(cols) = lvls
+        cols
+      })
+      names(anno_cols) = names(anno)
+    }
+
+    rowAnno <- rowAnnotation(df = anno, col = anno_cols, show_legend = FALSE)
 
     hml <- matl |> imap(~EnrichedHeatmap(
       .x,
@@ -115,7 +126,7 @@ hmList <- function(matl, wins, split = NULL, split_cols, max_quantile = 0.99, mi
       show_row_names = show_row_names,
       row_names_gp = gpar(fontsize = 5),
       axis_name = axis_labels,
-      row_split = split,
+      row_split = anno,
       row_km = row_km,
       column_title_gp = gpar(fontsize = 10),
       cluster_rows = FALSE,
@@ -131,7 +142,7 @@ hmList <- function(matl, wins, split = NULL, split_cols, max_quantile = 0.99, mi
         HeatmapAnnotation(
           enriched = anno_enriched(
             value = summarise_by,
-            gp = gpar(fontsize = 4, lwd = 2, col = split_cols[[1]]),
+            gp = gpar(fontsize = 4, lwd = 2, col = anno_cols[[1]]),
             axis_param = list(side = "left", facing = "inside"),
             ylim = ylim
           )
