@@ -212,7 +212,7 @@ ui <- dashboardPage(
                     uiOutput("heatmap_drawUI"),
                     actionButton("draw_heatmaps","Draw Heatmaps"),
                     div(
-                      style = "max-height:500px; overflow-x:auto; background-color:#f8f9fa; padding:5px; border:1px solid #ddd;",
+                      style = "max-height:1000px; overflow-x:auto; background-color:#f8f9fa; padding:5px; border:1px solid #ddd;",
                       plotOutput("heatmap_plot")
                     ),
                     downloadButton("download_heatmap", "Download Heatmap")
@@ -878,11 +878,10 @@ server <- function(input, output, session) {
 
       anno_cols = anno_col_sets$list[[input$hm_anno]]
       anno_cols = anno_cols[c(input$hm_anno_select)]
-      ## reorder list by anno select order
 
-      if(input$hm_anno_filter == "No"){
-        anno_cols = anno_cols |> map(function(x){x[["NA"]] ="grey";x})
-      }
+      #if(input$hm_anno_filter == "No"){
+      #  anno_cols = anno_cols |> map(function(x){x[["NA"]] ="grey";x})
+      #}
 
       hml <- hmList(matl = matl,
                     wins = wins,

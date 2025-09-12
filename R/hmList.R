@@ -67,6 +67,53 @@
 #' }
 #' @export
 
+# helper: colours per block (works for any number of anno columns)
+# anno_df: data.frame of row-annotations (rows in the same order as matrix rows)
+# colour_col: name of the column in anno_df to colour by (character)
+# colour_maps: named list mapping column name -> named vector of colours, e.g.
+#    list(Family = c(A="red", B="blue"), biotype = c(pc="#FFAA13", ...))
+# returns a character vector of colours, one per block in the order of appearance
+get_block_colours <- function(anno_df, colour_col = NULL, colour_maps = list(), sep = ".") {
+  stopifnot(is.data.frame(anno_df))
+  if (is.null(colour_col)) colour_col <- names(anno_df)[1]  # default to first column
+
+  # build grouping factor (blocks) as ComplexHeatmap does
+  grp <- do.call(interaction, c(anno_df, drop = TRUE, sep = sep))
+
+  # preserve block order as in the matrix rows
+  blocks_in_order <- unique(as.character(grp))
+
+  cols <- vapply(blocks_in_order, FUN.VALUE = character(1), FUN = function(b) {
+    rows <- which(as.character(grp) == b)
+    vals <- unique(as.character(anno_df[[colour_col]][rows]))
+
+    if (all(is.na(vals))) {
+      # entire block is NA -> colour grey
+      return("grey")
+    }
+
+    vals <- vals[!is.na(vals)]  # drop NAs if mixture
+    if (length(vals) > 1L) {
+      warning("Block '", b, "' has multiple values for ", colour_col,
+              "; using first: ", vals[1])
+    }
+    val <- vals[1]
+
+    cmap <- colour_maps[[colour_col]]
+    if (!is.null(cmap) && !is.na(cmap[val])) {
+      cmap[val]
+    } else if (grepl("^#", val) || val %in% grDevices::colors()) {
+      val
+    } else {
+      "grey"  # fallback for unmapped values
+    }
+  })
+
+  unname(cols)
+}
+
+
+
 hmList <- function(matl, wins, anno = NULL, anno_cols = NULL, max_quantile = 0.99, min_quantile = 0, col_fun = "red", show_row_names = TRUE, win_labels = NULL, ylim = NULL, summarise_by = "mean", axis_labels = "", row_km = 1, log2 = FALSE) {
 
   ## ColourMap
@@ -118,6 +165,8 @@ hmList <- function(matl, wins, anno = NULL, anno_cols = NULL, max_quantile = 0.9
 
     rowAnno <- rowAnnotation(df = anno, col = anno_cols, show_legend = FALSE)
 
+    cols_per_block <- get_block_colours(anno_df = anno, colour_col = names(anno)[1], colour_maps = anno_cols)
+
     hml <- matl |> imap(~EnrichedHeatmap(
       .x,
       name = .y,
@@ -142,7 +191,7 @@ hmList <- function(matl, wins, anno = NULL, anno_cols = NULL, max_quantile = 0.9
         HeatmapAnnotation(
           enriched = anno_enriched(
             value = summarise_by,
-            gp = gpar(fontsize = 4, lwd = 2, col = anno_cols[[1]]),
+            gp = gpar(fontsize = 4, lwd = 2, col = cols_per_block),
             axis_param = list(side = "left", facing = "inside"),
             ylim = ylim
           )

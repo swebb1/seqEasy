@@ -12,5 +12,5 @@ ISSUES
 ## Annotation
 
 - Add anno without splitting (keep order or kmeans?)
-- Not sure the colours in Enriched meta are correct
+- Not sure the colours in Enriched meta are correct (especially when interaction anno)
 - NA colours
