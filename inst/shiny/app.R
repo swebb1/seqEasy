@@ -299,19 +299,20 @@ server <- function(input, output, session) {
       tagList(
         selectInput("matrix_type","Plot type",choices = c("Meta","Combined")),
         conditionalPanel("input.matrix_type == 'Combined'",
-                         selectInput("matrix_grl_combined","Select ROI list", choices = names(roi_sets$list),multiple = T,selectize = T),
+                         selectInput("matrix_grl_combined","Select ROIs", choices = names(roi_sets$list),multiple = T,selectize = T),
+                         textInput("matrix_wins_combined","Number of windows per feature (separated by a comma)")
         ),
         conditionalPanel("input.matrix_type != 'Combined'",
-                         selectInput("matrix_grl","Select ROI list", choices = names(roi_sets$list),multiple = F,selectize = T),
+                         selectInput("matrix_grl","Select ROI", choices = names(roi_sets$list),multiple = F,selectize = T),
                          numericInput("matrix_upstream","Extend upstream (bp)",min = 0,value = 100),
                          numericInput("matrix_downstream","Extend downstream (bp)",min = 0,value = 500),
                          numericInput("matrix_w","Window size for flanks (bp)",min = 0,value = 10),
                          selectInput("matrix_target","Include target region?", choices = c("T","F")),
                          conditionalPanel("input.matrix_target == 'T",
                                           numericInput("matrix_ratio","Target ratio",min = 0,value = 0.25)
-                         )
+                         ),
+                         numericInput("matrix_wins","Number of windows per feature",min = 0,value = 10),
         ),
-        numericInput("matrix_wins","Number of windows per feature",min = 0,value = 10),
         selectInput("matrix_bw","Select samples", choices = names(bwf$list),multiple = T,selectize = T),
         selectInput("matrix_strand","Stranded",choices = c("no","for","rev")),
         selectInput("matrix_mode","Mode",choices = c("coverage","w0","weighted","absolute")),
@@ -616,19 +617,28 @@ server <- function(input, output, session) {
   # generate matrix list
   observeEvent(input$gen_matrix, {
 
-    grl <- roi_sets$list[[input$matrix_grl]]
-    names(grl) <- input$matrix_grl
-
     name <- input$matrix_name
 
-    if(input$matrix_type == "Combine"){
+    if(input$matrix_type == "Combined"){
 
-      grl <- roi_sets$list[[input$matrix_grl_combined]]
+      grl <- roi_sets$list[input$matrix_grl_combined]
       names(grl) <- input$matrix_grl_combined
+      print(grl)
 
-      wins <- str_split(input$matrix_wins,",") |> unlist() |> as.list()
+      wins <- str_split(input$matrix_wins_combined,",") |> unlist() |> as.list()
+      wins <- wins |> map(~as.integer(.x)) #Convert wins to int
       names(wins) <- names(grl)
-      ml <- NULL
+      print(wins)
+
+      ml <- matList(bwf = bwf$list[input$matrix_bw],
+                    bwr = bwr$list[input$matrix_bw],
+                    names = input$matrix_bw,
+                    grl = grl,
+                    wins = wins,
+                    mode = input$matrix_mode,
+                    strand = input$matrix_strand,
+                    smooth = input$matrix_smooth |> as.logical(),
+                    attributes = T)
     }
     if(input$matrix_type == "Meta"){
 

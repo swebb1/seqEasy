@@ -8,7 +8,7 @@
 #' @param bwf A list of \code{rtracklayer::BigWigFile} objects for forward strand data (e.g., output of \code{\link{importBWlist}}).
 #' @param bwr A list of \code{rtracklayer::BigWigFile} objects for reverse strand data.
 #' @param names A character vector specifying the names to assign to the resulting list of matrices.
-#' @param grl A \code{GRangesList} where each element defines a set of genomic regions (e.g., genes, TSSs).
+#' @param grl A \code{List} where each element defines a set of genomic regions (e.g., genes, TSSs).
 #' @param wins A named list specifying the number of bins (windows) for each region type in \code{grl}.
 #' If multiple entries are provided, features are assumed to be combined.
 #' @param mode Character string specifying the normalization mode for \code{normalizeToMatrix}, such as "coverage" or "mean".
@@ -20,7 +20,6 @@
 #' @param w Optional integer; Window size used for flanking regions.
 #' @param include_target Logical; whether to include the target region in the matrix.
 #' @param target_ratio Numeric between 0 and 1; controls the fraction of the matrix allocated to the target region.
-#' @param k Integer; number of bins for the matrix (used only if \code{wins} has length 1).
 #' @param attributes add a list item titled "attributes" with information regarding the windows used.
 #' @param ... Add any other normalizeToMatrix parameters.
 #'
@@ -72,32 +71,34 @@ matList <- function(bwf, bwr, names, grl, wins = list("Gene" = 10), mode = "cove
   if(length(wins) > 1) { ## Length of features to combine
     matl <- names |> future_map(function(s) {
 
+      k_target = unlist(wins) |> sum() ## Sum windows
+
       if(strand == "rev") {
-        fmat <- fgrl |> imap(~normalizeToMatrix(rbw[[s]], .x, extend = 0, value_column = "score", k = wins[.y],
-                                                mean_mode = mode, smooth = smooth, ...)) |> bind_cols() |> as.data.frame() |>
-          as.matrix() |> as.normalizedMatrix(k_target = sum(wins), extend = 0)
-        rmat <- rgrl |> imap(~normalizeToMatrix(fbw[[s]], .x, extend = 0, value_column = "score", k = wins[.y],
-                                                mean_mode = mode, smooth = smooth, ...)) |> bind_cols() |> as.data.frame() |>
-          as.matrix() |> as.normalizedMatrix(k_target = sum(wins), extend = 0)
+        fmat <- fgrl |> imap(~normalizeToMatrix(rbw[[s]], .x, extend = 0, value_column = "score", k = wins[[.y]],
+                                                mean_mode = mode, smooth = smooth)) |> bind_cols() |> as.data.frame() |>
+          as.matrix() |> as.normalizedMatrix(k_target = k_target, extend = 0)
+        rmat <- rgrl |> imap(~normalizeToMatrix(fbw[[s]], .x, extend = 0, value_column = "score", k = wins[[.y]],
+                                                mean_mode = mode, smooth = smooth)) |> bind_cols() |> as.data.frame() |>
+          as.matrix() |> as.normalizedMatrix(k_target = k_target, extend = 0)
 
         mat <- rbind(fmat, rmat)
         rownames(mat) <- c(fgrl[[1]]$name, rgrl[[1]]$name)
       }
       else if(strand == "for") {
-        fmat <- fgrl |> imap(~normalizeToMatrix(fbw[[s]], .x, extend = 0, value_column = "score", k = wins[.y],
-                                                mean_mode = mode, smooth = smooth, ...)) |> bind_cols() |> as.data.frame() |>
-          as.matrix() |> as.normalizedMatrix(k_target = sum(wins), extend = 0)
-        rmat <- rgrl |> imap(~normalizeToMatrix(rbw[[s]], .x, extend = 0, value_column = "score", k = wins[.y],
-                                                mean_mode = mode, smooth = smooth, ...)) |> bind_cols() |> as.data.frame() |>
-          as.matrix() |> as.normalizedMatrix(k_target = sum(wins), extend = 0)
+        fmat <- fgrl |> imap(~normalizeToMatrix(fbw[[s]], .x, extend = 0, value_column = "score", k = wins[[.y]],
+                                                mean_mode = mode, smooth = smooth)) |> bind_cols() |> as.data.frame() |>
+          as.matrix() |> as.normalizedMatrix(k_target = k_target, extend = 0)
+        rmat <- rgrl |> imap(~normalizeToMatrix(rbw[[s]], .x, extend = 0, value_column = "score", k = wins[[.y]],
+                                                mean_mode = mode, smooth = smooth)) |> bind_cols() |> as.data.frame() |>
+          as.matrix() |> as.normalizedMatrix(k_target = k_target, extend = 0)
 
         mat <- rbind(fmat, rmat)
         rownames(mat) <- c(fgrl[[1]]$name, rgrl[[1]]$name)
       }
       else if(strand == "no") {
-        mat <- grl |> imap(~normalizeToMatrix(fbw[[s]], .x, extend = 0, value_column = "score", k = wins[.y],
-                                              mean_mode = mode, smooth = smooth, ...)) |> bind_cols() |> as.data.frame() |>
-          as.matrix() |> as.normalizedMatrix(k_target = sum(wins), extend = 0)
+        mat <- grl |> imap(~normalizeToMatrix(fbw[[s]], .x, extend = 0, value_column = "score", k = wins[[.y]],
+                                              mean_mode = mode, smooth = smooth)) |> bind_cols() |> as.data.frame() |>
+          as.matrix() |> as.normalizedMatrix(k_target = k_target, extend = 0)
         rownames(mat) <- grl[[1]]$name
       }
 

@@ -2,6 +2,7 @@ ISSUES
 
 
 ## Add combined plots
+-- Check what happens if annotations go beyond end of chr?
 
 ## Add mplots
 
