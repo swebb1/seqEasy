@@ -224,14 +224,15 @@ ui <- dashboardPage(
       tabItem(tabName = "metaplot",
               fluidRow(
                 box(width = 4, title = "Metaplot Options",
-                    textInput("feature_label", "Feature label", "Gene"),
-                    checkboxInput("compare_control", "Compare to control?", FALSE),
+                    uiOutput("mplot_selectUI"),
+                    uiOutput("mplotUI"),
+                    uiOutput("mplot_annoUI"),
                     actionButton("draw_metaplot", "Draw Metaplot"),
                     downloadButton("download_metaplot", "Download Metaplot")
                 ),
                 box(width = 8, title = "Metaplot",
                     plotOutput("metaplot_plot"),
-                    textAreaInput("extra_layers", "Add ggplot layers", "p + theme_minimal()")
+                    textAreaInput("extra_layers", "Add ggplot layers", placeholder = "theme_minimal() + ggtitle('Plot')")
                 )
               )
       )
@@ -367,7 +368,7 @@ server <- function(input, output, session) {
       selectInput("hm_select", "Select samples",choices =  choices, multiple = T,selectize = T),
       numericInput("hm_min_q","Minimum quantile",min = 0,max = 0.99,value=0),
       numericInput("hm_max_q","Maximum quantile",min = 0.01,max = 1,value=0.99),
-      selectInput("hm_col_fun","Heatmap Colours", choices = c("red","red0","bl2red")),
+      selectInput("hm_col_fun","Heatmap Colours", choices = c("red","red0","bl2red","redblack0")),
       selectInput("hm_rownames","Show row names", choices = c(T,F)),
       textInput("hm_wins","Window lengths", value = hm_wins),
       textInput("hm_win_labels","Window labels", value = hm_win_labels),
@@ -395,6 +396,42 @@ server <- function(input, output, session) {
       selectInput("hm_draw_select", "Select samples",choices = names(hml_data()),multiple = T,selectize = T),
     )
   })
+
+  output$mplot_selectUI <- renderUI({
+    tagList(
+      selectInput("mp_matl","Select matrix set",choices = names(matList_sets$list),selectize = T)
+    )
+  })
+
+  output$mplotUI <- renderUI({
+    choices = names(matList_sets$list[[input$mp_matl]])
+    choices = choices[!choices %in% "attributes"]
+    mp_wins = matList_sets$list[[input$mp_matl]]$attributes$wins |> unlist() |> paste(collapse=",")
+    mp_win_labels = matList_sets$list[[input$mp_matl]]$attributes$wins |> names() |> paste(collapse=",")
+    mp_axis_labels = matList_sets$list[[input$mp_matl]]$attributes$labels
+    anno_choices = names(anno_sets$list)
+
+    tagList(
+      selectInput("mp_select", "Select samples",choices =  choices, multiple = T,selectize = T),
+      textInput("mp_wins","Window lengths", value = mp_wins),
+      textInput("mp_win_labels","Window labels", value = mp_win_labels),
+      textInput("mp_min_y","Minimum y-axis",value="auto"),
+      textInput("mp_max_y","Maximum y-axis",value="auto"),
+      selectInput("mp_summarise", "Summarise by", choices = c("mean","median"),selected="mean"),
+      textInput("mp_axis_labels","X-axis labels",value=mp_axis_labels),
+      selectInput("mp_anno","Add annotation",choices = c("No",anno_choices), selected="F")
+    )
+  })
+
+  output$mp_annoUI <- renderUI({
+    choices = names(anno_sets$list[[input$mp_anno]])[-1]
+    conditionalPanel("input.mp_anno != 'No'",
+                     selectInput("mp_anno_select","Select Annotations",choices = choices, multiple = T,selectize = T),
+                     selectInput("mp_anno_filter","Filter by annotation", choices = c("Yes","No")),
+                     selectInput("mp_anno_split","Split by annotation", choices = c("Yes","No")),
+    )
+  })
+
 
   # --- Step 1: ROI import ---
   observeEvent(input$roi_load, {

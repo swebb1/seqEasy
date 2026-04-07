@@ -131,6 +131,8 @@ hmList <- function(matl, wins, anno = NULL, anno_cols = NULL, max_quantile = 0.9
     col_fun <- circlize::colorRamp2(c(common_min, 0, common_max), c("blue", "white", "red"))
   } else if (col_fun == "red0") {
     col_fun <- circlize::colorRamp2(c(0, 1, common_max), c("white", reds[3], reds[7]))
+  } else if (col_fun == "redblack0") {
+    col_fun <- circlize::colorRamp2(c(0, 0.0001, common_max), c("black", reds[3], reds[7]))
   }
 
   if (is.null(ylim)) {
